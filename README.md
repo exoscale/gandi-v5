@@ -12,13 +12,19 @@ CLI tool for [Gandi.net](https://www.gandi.net/) API.
 Run directly without installing:
 
 ```bash
-uvx --from git+https://github.com/lyhcode/gandi-cli gandi --help
+uvx agent-gandi-cli gandi --help
 ```
 
 ## Install
 
 ```bash
 pip install agent-gandi-cli
+```
+
+Or install from source:
+
+```bash
+pip install git+https://github.com/lyhcode/gandi-cli
 ```
 
 ## Authentication
