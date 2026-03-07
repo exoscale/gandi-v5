@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "gandi-cli"
+name = "agent-gandi-cli"
 version = "0.1.0"
 description = "CLI tool for Gandi.net API"
 readme = "README.md"
@@ -37,6 +37,9 @@ dependencies = [
 Homepage = "https://github.com/lyhcode/gandi-cli"
 Repository = "https://github.com/lyhcode/gandi-cli"
 Issues = "https://github.com/lyhcode/gandi-cli/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gandi_cli"]
 
 [project.scripts]
 gandi = "gandi_cli.main:app"
