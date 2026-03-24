@@ -347,30 +347,69 @@ def _fqdn_to_exo_args(fqdn: str) -> tuple[str, str]:
     return (name, domain)
 
 
-def _build_exo_dns_commands(fqdns: list[dict]) -> list[str]:
-    """Build exo dns add commands from DCV FQDN entries."""
+def _build_exo_dns_commands(data: dict) -> list[str]:
+    """Build exo dns add commands from DCV params response.
+
+    Handles two known response shapes:
+    - fqdns as list of dicts with type/name/value keys
+    - fqdns as list of strings, with params at the top level
+      (e.g. top-level "name" and "value" fields)
+    """
     commands = []
-    for entry in fqdns:
-        record_type = entry.get("type", "").upper()
-        fqdn = entry.get("name", "")
-        value = entry.get("value", "")
+    fqdns = data.get("fqdns", [])
 
-        if not fqdn or not value or not record_type:
-            continue
+    # Shape 1: fqdns is a list of dicts (each has type/name/value)
+    if fqdns and isinstance(fqdns[0], dict):
+        for entry in fqdns:
+            record_type = entry.get("type", "").upper()
+            fqdn = entry.get("name", "")
+            value = entry.get("value", "")
+            if not fqdn or not value or not record_type:
+                continue
+            commands.append(_format_exo_command(record_type, fqdn, value))
+        return commands
 
-        name, domain = _fqdn_to_exo_args(fqdn)
-        if not domain:
-            continue
+    # Shape 2: fqdns is a list of strings; per-fqdn params at top level
+    # or in a "params" dict keyed by fqdn
+    record_type = data.get("type", "CNAME").upper()
+    params_map = data.get("params", {})
 
-        if record_type == "CNAME":
-            cmd = f"exo dns add CNAME {domain} -n {name} -a {value}"
-        elif record_type == "TXT":
-            cmd = f"exo dns add TXT {domain} -n {name} -c {value}"
+    if isinstance(params_map, dict) and params_map:
+        # params is {fqdn: {name, value, type, ...}, ...}
+        for fqdn_key, pdata in params_map.items():
+            if isinstance(pdata, dict):
+                rt = pdata.get("type", record_type).upper()
+                name = pdata.get("name", "")
+                value = pdata.get("value", "")
+                if name and value:
+                    commands.append(_format_exo_command(rt, name, value))
+    elif fqdns:
+        # Flat shape: top-level name/value apply to each fqdn
+        top_name = data.get("name", "")
+        top_value = data.get("value", "")
+        if top_name and top_value:
+            commands.append(_format_exo_command(record_type, top_name, top_value))
         else:
-            # Generic fallback — shouldn't normally happen for DCV
-            cmd = f"# unsupported record type {record_type} for {fqdn} -> {value}"
-        commands.append(cmd)
+            # Last resort: synthesise from the fqdn strings themselves
+            for fqdn in fqdns:
+                if isinstance(fqdn, str):
+                    commands.append(f"# DCV needed for {fqdn} — check 'gandi -O json cert dcv-info' for details")
+
     return commands
+
+
+def _format_exo_command(record_type: str, fqdn: str, value: str) -> str:
+    """Format a single exo dns add command."""
+    name, domain = _fqdn_to_exo_args(fqdn)
+    if not domain:
+        return f"# cannot determine domain for {fqdn}"
+
+    if record_type == "CNAME":
+        return f"exo dns add CNAME {domain} -n {name} -a {value}"
+    elif record_type == "TXT":
+        return f"exo dns add TXT {domain} -n {name} -c {value}"
+    else:
+        return f"# unsupported record type {record_type} for {fqdn} -> {value}"
 
 
 @cert_app.command("dcv-info")
@@ -433,8 +472,8 @@ def cert_dcv_info(
         from gandi_cli.main import state
 
         if exo_dns:
-            fqdns = data.get("fqdns", []) if isinstance(data, dict) else []
-            commands = _build_exo_dns_commands(fqdns)
+            dcv_data = data if isinstance(data, dict) else {}
+            commands = _build_exo_dns_commands(dcv_data)
             if state.output_format == "json":
                 print_json_output({"commands": commands})
             elif commands:

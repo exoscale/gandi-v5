@@ -1,0 +1,10 @@
+{
+  "cn": "example.com",
+  "type": "CNAME",
+  "name": "_acme-challenge.example.com",
+  "value": "dcv-token-abc123.comodoca.com",
+  "fqdns": [
+    "example.com",
+    "www.example.com"
+  ]
+}

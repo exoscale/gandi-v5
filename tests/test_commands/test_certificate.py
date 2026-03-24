@@ -826,6 +826,20 @@ class TestCertDcvInfoExoDns:
         assert len(parsed["commands"]) == 2
         assert parsed["commands"][0].startswith("exo dns add")
 
+    def test_exo_dns_with_string_fqdns(self, httpx_mock: HTTPXMock):
+        """Handle real API shape where fqdns is a list of strings."""
+        fixture = load_fixture("dcv_params_strings.json")
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client:
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "dcv-info", "cert-001", "--exo-dns"])
+
+        assert result.exit_code == 0
+        assert "exo dns add CNAME example.com" in result.stdout
+        assert "-n _acme-challenge" in result.stdout
+        assert "-a dcv-token-abc123.comodoca.com" in result.stdout
+
     def test_exo_dns_without_flag_shows_normal_output(self, httpx_mock: HTTPXMock):
         fixture = load_fixture("dcv_params.json")
         httpx_mock.add_response(json=fixture)
