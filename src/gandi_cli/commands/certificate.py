@@ -350,15 +350,41 @@ def _fqdn_to_exo_args(fqdn: str) -> tuple[str, str]:
 def _build_exo_dns_commands(data: dict) -> list[str]:
     """Build exo dns add commands from DCV params response.
 
-    Handles two known response shapes:
-    - fqdns as list of dicts with type/name/value keys
-    - fqdns as list of strings, with params at the top level
-      (e.g. top-level "name" and "value" fields)
+    Handles three known response shapes from the Gandi API:
+
+    1. Real API (Digicert DNS): raw_messages is a list of [name, value] pairs,
+       dns_records contains BIND-format strings. We parse raw_messages.
+
+    2. Structured fqdns: fqdns is a list of dicts with type/name/value keys.
+
+    3. Flat: fqdns is a list of strings with top-level type/name/value.
     """
     commands = []
+
+    # Shape 1: raw_messages — the real Gandi API shape for DNS DCV
+    # Each entry is [record_name, record_value] for a CNAME record
+    raw_messages = data.get("raw_messages", [])
+    if raw_messages and isinstance(raw_messages[0], list) and len(raw_messages[0]) == 2:
+        for pair in raw_messages:
+            name = pair[0].rstrip(".")
+            value = pair[1].rstrip(".")
+            if name and value:
+                commands.append(_format_exo_command("CNAME", name, value))
+        return commands
+
+    # Also try dns_records as fallback (BIND-format strings)
+    dns_records = data.get("dns_records", [])
+    if dns_records:
+        for record in dns_records:
+            parsed = _parse_bind_record(record)
+            if parsed:
+                commands.append(_format_exo_command(*parsed))
+        if commands:
+            return commands
+
     fqdns = data.get("fqdns", [])
 
-    # Shape 1: fqdns is a list of dicts (each has type/name/value)
+    # Shape 2: fqdns is a list of dicts (each has type/name/value)
     if fqdns and isinstance(fqdns[0], dict):
         for entry in fqdns:
             record_type = entry.get("type", "").upper()
@@ -369,33 +395,30 @@ def _build_exo_dns_commands(data: dict) -> list[str]:
             commands.append(_format_exo_command(record_type, fqdn, value))
         return commands
 
-    # Shape 2: fqdns is a list of strings; per-fqdn params at top level
-    # or in a "params" dict keyed by fqdn
+    # Shape 3: fqdns is a list of strings with top-level type/name/value
     record_type = data.get("type", "CNAME").upper()
-    params_map = data.get("params", {})
-
-    if isinstance(params_map, dict) and params_map:
-        # params is {fqdn: {name, value, type, ...}, ...}
-        for fqdn_key, pdata in params_map.items():
-            if isinstance(pdata, dict):
-                rt = pdata.get("type", record_type).upper()
-                name = pdata.get("name", "")
-                value = pdata.get("value", "")
-                if name and value:
-                    commands.append(_format_exo_command(rt, name, value))
-    elif fqdns:
-        # Flat shape: top-level name/value apply to each fqdn
-        top_name = data.get("name", "")
-        top_value = data.get("value", "")
-        if top_name and top_value:
-            commands.append(_format_exo_command(record_type, top_name, top_value))
-        else:
-            # Last resort: synthesise from the fqdn strings themselves
-            for fqdn in fqdns:
-                if isinstance(fqdn, str):
-                    commands.append(f"# DCV needed for {fqdn} — check 'gandi -O json cert dcv-info' for details")
+    top_name = data.get("name", "")
+    top_value = data.get("value", "")
+    if top_name and top_value:
+        commands.append(_format_exo_command(record_type, top_name, top_value))
 
     return commands
+
+
+def _parse_bind_record(record: str) -> tuple[str, str, str] | None:
+    """Parse a BIND-format DNS record string.
+
+    Example: '_dnsauth.cli.exoscale.org. 10800 IN CNAME _xyz.dcv.digicert.com.'
+    Returns: ('CNAME', '_dnsauth.cli.exoscale.org', '_xyz.dcv.digicert.com')
+    """
+    parts = record.split()
+    # Expected: name ttl IN type value
+    if len(parts) >= 5 and parts[2].upper() == "IN":
+        name = parts[0].rstrip(".")
+        rtype = parts[3].upper()
+        value = parts[4].rstrip(".")
+        return (rtype, name, value)
+    return None
 
 
 def _format_exo_command(record_type: str, fqdn: str, value: str) -> str:
@@ -448,6 +471,10 @@ def cert_dcv_info(
     creating the required DCV records in Exoscale DNS.
     """
     client = _get_client()
+
+    # --exo-dns implies --dcv-method dns
+    if exo_dns and not dcv_method:
+        dcv_method = "dns"
 
     body: dict = {}
     if csr:

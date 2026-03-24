@@ -288,6 +288,7 @@ class TestCertDcvInfo:
 
         assert result.exit_code == 0
         assert "example.com" in result.stdout
+        assert "dns" in result.stdout.lower()
 
     def test_cert_dcv_info_requests_correct_url(self, httpx_mock: HTTPXMock):
         fixture = load_fixture("dcv_params.json")
@@ -742,9 +743,10 @@ class TestJsonOutput:
 
         assert result.exit_code == 0
         parsed = json.loads(result.stdout)
-        assert parsed["cn"] == "example.com"
+        assert parsed["dcv_method"] == "dns"
         assert isinstance(parsed["fqdns"], list)
-        assert parsed["fqdns"][0]["method"] == "dns"
+        assert parsed["fqdns"][0] == "example.com"
+        assert isinstance(parsed["raw_messages"], list)
 
     def test_cert_download_json(self, httpx_mock: HTTPXMock):
         pem_text = "-----BEGIN CERTIFICATE-----\nMIItest\n-----END CERTIFICATE-----\n"
@@ -797,6 +799,36 @@ class TestCertDcvInfoExoDns:
         assert "-n _acme-challenge" in result.stdout
         assert "-a dcv-token-abc123.comodoca.com" in result.stdout
 
+    def test_exo_dns_implies_dcv_method_dns(self, httpx_mock: HTTPXMock):
+        """--exo-dns should automatically set --dcv-method dns."""
+        fixture = load_fixture("dcv_params.json")
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client:
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "dcv-info", "cert-001", "--exo-dns"])
+
+        assert result.exit_code == 0
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["dcv_method"] == "dns"
+
+    def test_exo_dns_respects_explicit_dcv_method(self, httpx_mock: HTTPXMock):
+        """Explicit --dcv-method should not be overridden by --exo-dns."""
+        fixture = load_fixture("dcv_params.json")
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client:
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, [
+                "cert", "dcv-info", "cert-001",
+                "--exo-dns", "--dcv-method", "http",
+            ])
+
+        request = httpx_mock.get_request()
+        body = json.loads(request.content)
+        assert body["dcv_method"] == "http"
+
     def test_exo_dns_outputs_multiple_commands(self, httpx_mock: HTTPXMock):
         fixture = load_fixture("dcv_params_multi.json")
         httpx_mock.add_response(json=fixture)
@@ -826,7 +858,7 @@ class TestCertDcvInfoExoDns:
         assert len(parsed["commands"]) == 2
         assert parsed["commands"][0].startswith("exo dns add")
 
-    def test_exo_dns_with_string_fqdns(self, httpx_mock: HTTPXMock):
+    def test_exo_dns_with_string_fqdns_and_raw_messages(self, httpx_mock: HTTPXMock):
         """Handle real API shape where fqdns is a list of strings."""
         fixture = load_fixture("dcv_params_strings.json")
         httpx_mock.add_response(json=fixture)
@@ -839,6 +871,43 @@ class TestCertDcvInfoExoDns:
         assert "exo dns add CNAME example.com" in result.stdout
         assert "-n _acme-challenge" in result.stdout
         assert "-a dcv-token-abc123.comodoca.com" in result.stdout
+
+    def test_exo_dns_falls_back_to_dns_records(self, httpx_mock: HTTPXMock):
+        """Falls back to parsing dns_records when raw_messages is absent."""
+        fixture = {
+            "dcv_method": "dns",
+            "fqdns": ["example.com"],
+            "dns_records": [
+                "_dnsauth.example.com. 10800 IN CNAME _token.dcv.digicert.com."
+            ],
+            "messages": [
+                "Please add the following DNS record: _dnsauth.example.com. 10800 IN CNAME _token.dcv.digicert.com."
+            ]
+        }
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client:
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "dcv-info", "cert-001", "--exo-dns"])
+
+        assert result.exit_code == 0
+        assert "exo dns add CNAME example.com" in result.stdout
+        assert "-n _dnsauth" in result.stdout
+        assert "-a _token.dcv.digicert.com" in result.stdout
+
+    def test_exo_dns_no_records_shows_message(self, httpx_mock: HTTPXMock):
+        """Shows message when no DNS records can be extracted."""
+        fixture = {"dcv_method": "email", "fqdns": ["example.com"]}
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client:
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, [
+                "cert", "dcv-info", "cert-001",
+                "--exo-dns", "--dcv-method", "email",
+            ])
+
+        assert "No DNS records" in result.output
 
     def test_exo_dns_without_flag_shows_normal_output(self, httpx_mock: HTTPXMock):
         fixture = load_fixture("dcv_params.json")
