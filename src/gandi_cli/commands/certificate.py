@@ -7,7 +7,7 @@ from typing import Annotated, Optional
 import typer
 
 from gandi_cli.client import GandiClient, GandiAPIError
-from gandi_cli.output import output
+from gandi_cli.output import output, print_json_output
 
 cert_app = typer.Typer(help="Certificate management", no_args_is_help=True)
 
@@ -75,8 +75,13 @@ def cert_csr(
         typer.echo(f"Error: openssl failed:\n{result.stderr}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Key:  {key_file}")
-    typer.echo(f"CSR:  {csr_file}")
+    from gandi_cli.main import state
+
+    if state.output_format == "json":
+        print_json_output({"key": str(key_file), "csr": str(csr_file)})
+    else:
+        typer.echo(f"Key:  {key_file}")
+        typer.echo(f"CSR:  {csr_file}")
 
 
 @cert_app.command("issue")
@@ -142,16 +147,19 @@ def cert_issue(
         )
         from gandi_cli.main import state
 
-        if dry_run:
-            typer.echo("Dry run: parameters are valid.")
+        if state.output_format == "json":
+            print_json_output(data if data else {"dry_run": dry_run})
         else:
-            typer.echo("Certificate order submitted.")
-        if isinstance(data, dict) and data:
-            fields = [
-                ("id", "Certificate ID"),
-                ("message", "Message"),
-            ]
-            output(data, fmt=state.output_format, detail_fields=fields)
+            if dry_run:
+                typer.echo("Dry run: parameters are valid.")
+            else:
+                typer.echo("Certificate order submitted.")
+            if isinstance(data, dict) and data:
+                fields = [
+                    ("id", "Certificate ID"),
+                    ("message", "Message"),
+                ]
+                output(data, fmt=state.output_format, detail_fields=fields)
     except GandiAPIError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -180,23 +188,26 @@ def cert_list(
         data = client.get("/certificate/issued-certs", params=params)
         from gandi_cli.main import state
 
-        columns = [
-            ("id", "ID"),
-            ("cn", "Common Name"),
-            ("status", "Status"),
-            ("dates.ends_at", "Expires"),
-            ("package", "Package"),
-        ]
-        # Flatten nested fields for table display
-        for item in data:
-            dates = item.get("dates", {})
-            item["dates.ends_at"] = (dates.get("ends_at") or "")[:10]
-            item["package"] = (
-                item.get("package", {}).get("name", "")
-                if isinstance(item.get("package"), dict)
-                else str(item.get("package", ""))
-            )
-        output(data, fmt=state.output_format, columns=columns, title="Certificates")
+        if state.output_format == "json":
+            print_json_output(data)
+        else:
+            columns = [
+                ("id", "ID"),
+                ("cn", "Common Name"),
+                ("status", "Status"),
+                ("dates.ends_at", "Expires"),
+                ("package", "Package"),
+            ]
+            # Flatten nested fields for table display
+            for item in data:
+                dates = item.get("dates", {})
+                item["dates.ends_at"] = (dates.get("ends_at") or "")[:10]
+                item["package"] = (
+                    item.get("package", {}).get("name", "")
+                    if isinstance(item.get("package"), dict)
+                    else str(item.get("package", ""))
+                )
+            output(data, fmt=state.output_format, columns=columns, title="Certificates")
     except GandiAPIError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -212,25 +223,28 @@ def cert_info(
         data = client.get(f"/certificate/issued-certs/{cert_id}")
         from gandi_cli.main import state
 
-        dates = data.get("dates", {})
-        fields = [
-            ("id", "ID"),
-            ("cn", "Common Name"),
-            ("status", "Status"),
-            ("altnames", "Alt Names"),
-            ("package_name", "Package"),
-            ("starts_at", "Valid From"),
-            ("ends_at", "Valid Until"),
-        ]
-        data["altnames"] = ", ".join(data.get("altnames", []))
-        data["package_name"] = (
-            data.get("package", {}).get("name", "")
-            if isinstance(data.get("package"), dict)
-            else str(data.get("package", ""))
-        )
-        data["starts_at"] = (dates.get("starts_at") or "")[:10]
-        data["ends_at"] = (dates.get("ends_at") or "")[:10]
-        output(data, fmt=state.output_format, detail_fields=fields)
+        if state.output_format == "json":
+            print_json_output(data)
+        else:
+            dates = data.get("dates", {})
+            fields = [
+                ("id", "ID"),
+                ("cn", "Common Name"),
+                ("status", "Status"),
+                ("altnames", "Alt Names"),
+                ("package_name", "Package"),
+                ("starts_at", "Valid From"),
+                ("ends_at", "Valid Until"),
+            ]
+            data["altnames"] = ", ".join(data.get("altnames", []))
+            data["package_name"] = (
+                data.get("package", {}).get("name", "")
+                if isinstance(data.get("package"), dict)
+                else str(data.get("package", ""))
+            )
+            data["starts_at"] = (dates.get("starts_at") or "")[:10]
+            data["ends_at"] = (dates.get("ends_at") or "")[:10]
+            output(data, fmt=state.output_format, detail_fields=fields)
     except GandiAPIError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -294,14 +308,17 @@ def cert_reissue(
         )
         from gandi_cli.main import state
 
-        if dry_run:
-            typer.echo("Dry run: parameters are valid.")
+        if state.output_format == "json":
+            print_json_output(data if data else {"dry_run": dry_run})
         else:
-            typer.echo(f"Certificate {cert_id} reissue submitted.")
-        if isinstance(data, dict) and data:
-            output(data, fmt=state.output_format, detail_fields=[
-                ("message", "Message"),
-            ])
+            if dry_run:
+                typer.echo("Dry run: parameters are valid.")
+            else:
+                typer.echo(f"Certificate {cert_id} reissue submitted.")
+            if isinstance(data, dict) and data:
+                output(data, fmt=state.output_format, detail_fields=[
+                    ("message", "Message"),
+                ])
     except GandiAPIError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -381,11 +398,16 @@ def cert_download(
             f"/certificate/issued-certs/{cert_id}/crt",
             headers={"Accept": "text/plain"},
         )
-        if output_file:
-            output_file.write_text(data if isinstance(data, str) else str(data))
+        from gandi_cli.main import state
+
+        pem_text = data if isinstance(data, str) else str(data)
+        if state.output_format == "json":
+            print_json_output({"id": cert_id, "certificate": pem_text})
+        elif output_file:
+            output_file.write_text(pem_text)
             typer.echo(f"Certificate written to {output_file}")
         else:
-            typer.echo(data if isinstance(data, str) else str(data), nl=False)
+            typer.echo(pem_text, nl=False)
     except GandiAPIError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
