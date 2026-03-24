@@ -651,3 +651,131 @@ class TestCertIssue:
             ])
 
         assert result.exit_code == 1
+
+
+class TestJsonOutput:
+    """Tests for JSON output format across all certificate commands."""
+
+    def _patch_json_format(self):
+        """Patch state.output_format to 'json'."""
+        return patch("gandi_cli.main.state.output_format", "json")
+
+    def test_cert_list_json_returns_raw_api_data(self, httpx_mock: HTTPXMock):
+        fixture = load_fixture("certificates.json")
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client, \
+             self._patch_json_format():
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "list"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 2
+        # Raw data should preserve nested structure
+        assert isinstance(parsed[0]["dates"], dict)
+        assert isinstance(parsed[0]["package"], dict)
+        assert "starts_at" in parsed[0]["dates"]
+
+    def test_cert_info_json_returns_raw_api_data(self, httpx_mock: HTTPXMock):
+        fixture = load_fixture("certificate_detail.json")
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client, \
+             self._patch_json_format():
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "info", "cert-001"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["id"] == "cert-001"
+        # Raw data should preserve nested structure
+        assert isinstance(parsed["dates"], dict)
+        assert isinstance(parsed["altnames"], list)
+
+    def test_cert_issue_json(self, httpx_mock: HTTPXMock, tmp_path):
+        fixture = load_fixture("issue_response.json")
+        httpx_mock.add_response(json=fixture)
+        csr_file = tmp_path / "test.csr"
+        csr_file.write_text("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n")
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client, \
+             self._patch_json_format():
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, [
+                "cert", "issue",
+                "--csr", str(csr_file),
+                "--package", "cert_std_1_10_0_digicert",
+            ])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["id"] == "cert-003"
+        # No human-readable messages mixed in
+        assert "order submitted" not in result.stdout.lower()
+
+    def test_cert_reissue_json(self, httpx_mock: HTTPXMock, tmp_path):
+        fixture = load_fixture("reissue_response.json")
+        httpx_mock.add_response(json=fixture)
+        csr_file = tmp_path / "test.csr"
+        csr_file.write_text("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n")
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client, \
+             self._patch_json_format():
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "reissue", "cert-001", "--csr", str(csr_file)])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["message"] == "Certificate Reissue Submitted"
+        assert "reissue submitted" not in result.stdout
+
+    def test_cert_dcv_info_json(self, httpx_mock: HTTPXMock):
+        fixture = load_fixture("dcv_params.json")
+        httpx_mock.add_response(json=fixture)
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client, \
+             self._patch_json_format():
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "dcv-info", "cert-001", "--dcv-method", "dns"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["cn"] == "example.com"
+        assert isinstance(parsed["fqdns"], list)
+        assert parsed["fqdns"][0]["method"] == "dns"
+
+    def test_cert_download_json(self, httpx_mock: HTTPXMock):
+        pem_text = "-----BEGIN CERTIFICATE-----\nMIItest\n-----END CERTIFICATE-----\n"
+        httpx_mock.add_response(text=pem_text, headers={"content-type": "text/plain"})
+
+        with patch("gandi_cli.commands.certificate._get_client") as mock_client, \
+             self._patch_json_format():
+            mock_client.return_value = GandiClient(token="test-token")
+            result = runner.invoke(app, ["cert", "download", "cert-001"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["id"] == "cert-001"
+        assert "BEGIN CERTIFICATE" in parsed["certificate"]
+
+    def test_cert_csr_json(self, tmp_path):
+        def fake_openssl(cmd, **kwargs):
+            for i, arg in enumerate(cmd):
+                if arg == "-keyout" and i + 1 < len(cmd):
+                    Path(cmd[i + 1]).write_text("key")
+                if arg == "-out" and i + 1 < len(cmd):
+                    Path(cmd[i + 1]).write_text("csr")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("gandi_cli.commands.certificate.subprocess.run", side_effect=fake_openssl), \
+             self._patch_json_format():
+            result = runner.invoke(app, ["cert", "csr", "example.com", "-d", str(tmp_path)])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["key"].endswith("example.com.key")
+        assert parsed["csr"].endswith("example.com.csr")
+        # No human-readable messages mixed in
+        assert "Key:" not in result.stdout
