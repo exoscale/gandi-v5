@@ -435,19 +435,42 @@ def _format_exo_command(record_type: str, fqdn: str, value: str) -> str:
         return f"# unsupported record type {record_type} for {fqdn} -> {value}"
 
 
+@cert_app.command("set-dcv-method")
+def cert_set_dcv_method(
+    cert_id: Annotated[str, typer.Argument(help="Certificate ID")],
+    method: Annotated[
+        str,
+        typer.Argument(help="DCV method: email, dns, file, http, https"),
+    ],
+):
+    """Set the Domain Control Validation method for a certificate.
+
+    Changes the DCV method on the certificate. Use 'cert dcv-info'
+    afterwards to retrieve the validation parameters for the new method.
+    """
+    client = _get_client()
+    try:
+        client.patch(
+            f"/certificate/issued-certs/{cert_id}/dcv",
+            json={"method": method},
+        )
+        from gandi_cli.main import state
+
+        if state.output_format == "json":
+            print_json_output({"id": cert_id, "dcv_method": method})
+        else:
+            typer.echo(f"DCV method set to '{method}' for certificate {cert_id}.")
+    except GandiAPIError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+
 @cert_app.command("dcv-info")
 def cert_dcv_info(
     cert_id: Annotated[str, typer.Argument(help="Certificate ID")],
     csr: Annotated[
         Optional[Path],
         typer.Option("--csr", help="Path to PEM-encoded CSR file"),
-    ] = None,
-    dcv_method: Annotated[
-        Optional[str],
-        typer.Option(
-            "--dcv-method",
-            help="DCV method to get params for: email, dns, file, http, https",
-        ),
     ] = None,
     package: Annotated[
         Optional[str],
@@ -464,27 +487,14 @@ def cert_dcv_info(
     """Get Domain Control Validation (DCV) parameters for a certificate.
 
     Returns the DNS record or file content needed to complete domain
-    validation. Useful after 'cert reissue' to determine what validation
-    step is required.
+    validation. Useful after 'cert set-dcv-method' to retrieve the
+    validation parameters.
 
     With --exo-dns, prints ready-to-use 'exo dns add' commands for
     creating the required DCV records in Exoscale DNS.
     """
     client = _get_client()
-
-    # --exo-dns implies --dcv-method dns
-    if exo_dns and not dcv_method:
-        dcv_method = "dns"
-
     try:
-        # If a DCV method is specified, first set it via PATCH on the
-        # certificate's DCV endpoint, then fetch the params.
-        if dcv_method:
-            client.patch(
-                f"/certificate/issued-certs/{cert_id}/dcv",
-                json={"method": dcv_method},
-            )
-
         body: dict = {}
         if csr:
             try:
@@ -495,8 +505,6 @@ def cert_dcv_info(
             except OSError as e:
                 typer.echo(f"Error reading CSR file: {e}", err=True)
                 raise typer.Exit(1)
-        if dcv_method:
-            body["dcv_method"] = dcv_method
         if package:
             body["package"] = package
 
