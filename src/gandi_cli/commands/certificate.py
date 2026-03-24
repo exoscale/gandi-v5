@@ -324,6 +324,55 @@ def cert_reissue(
         raise typer.Exit(1)
 
 
+def _fqdn_to_exo_args(fqdn: str) -> tuple[str, str]:
+    """Split a fully qualified record name into (record_name, domain).
+
+    Example: "_acme-challenge.example.com" -> ("_acme-challenge", "example.com")
+    Example: "_acme-challenge.sub.example.co.uk" -> ("_acme-challenge.sub", "example.co.uk")
+
+    Uses a simple heuristic: the domain is the last two labels, or last
+    three if the second-to-last is short (co, com, org, etc. for ccTLDs).
+    """
+    parts = fqdn.rstrip(".").split(".")
+    if len(parts) <= 2:
+        return ("", fqdn)
+
+    # Heuristic for two-part TLDs like co.uk, com.au, org.nz
+    if len(parts) >= 3 and len(parts[-2]) <= 3 and len(parts[-1]) <= 2:
+        domain = ".".join(parts[-3:])
+        name = ".".join(parts[:-3])
+    else:
+        domain = ".".join(parts[-2:])
+        name = ".".join(parts[:-2])
+    return (name, domain)
+
+
+def _build_exo_dns_commands(fqdns: list[dict]) -> list[str]:
+    """Build exo dns add commands from DCV FQDN entries."""
+    commands = []
+    for entry in fqdns:
+        record_type = entry.get("type", "").upper()
+        fqdn = entry.get("name", "")
+        value = entry.get("value", "")
+
+        if not fqdn or not value or not record_type:
+            continue
+
+        name, domain = _fqdn_to_exo_args(fqdn)
+        if not domain:
+            continue
+
+        if record_type == "CNAME":
+            cmd = f"exo dns add CNAME {domain} -n {name} -a {value}"
+        elif record_type == "TXT":
+            cmd = f"exo dns add TXT {domain} -n {name} -c {value}"
+        else:
+            # Generic fallback — shouldn't normally happen for DCV
+            cmd = f"# unsupported record type {record_type} for {fqdn} -> {value}"
+        commands.append(cmd)
+    return commands
+
+
 @cert_app.command("dcv-info")
 def cert_dcv_info(
     cert_id: Annotated[str, typer.Argument(help="Certificate ID")],
@@ -342,12 +391,22 @@ def cert_dcv_info(
         Optional[str],
         typer.Option("--package", help="Certificate package name"),
     ] = None,
+    exo_dns: Annotated[
+        bool,
+        typer.Option(
+            "--exo-dns",
+            help="Show 'exo dns add' commands for Exoscale DNS",
+        ),
+    ] = False,
 ):
     """Get Domain Control Validation (DCV) parameters for a certificate.
 
     Returns the DNS record or file content needed to complete domain
     validation. Useful after 'cert reissue' to determine what validation
     step is required.
+
+    With --exo-dns, prints ready-to-use 'exo dns add' commands for
+    creating the required DCV records in Exoscale DNS.
     """
     client = _get_client()
 
@@ -373,7 +432,18 @@ def cert_dcv_info(
         )
         from gandi_cli.main import state
 
-        output(data, fmt=state.output_format)
+        if exo_dns:
+            fqdns = data.get("fqdns", []) if isinstance(data, dict) else []
+            commands = _build_exo_dns_commands(fqdns)
+            if state.output_format == "json":
+                print_json_output({"commands": commands})
+            elif commands:
+                for cmd in commands:
+                    typer.echo(cmd)
+            else:
+                typer.echo("No DNS records to create.", err=True)
+        else:
+            output(data, fmt=state.output_format)
     except GandiAPIError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
