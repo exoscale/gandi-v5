@@ -502,7 +502,14 @@ def cert_dcv_info(
     """
     client = _get_client()
     try:
+        # Fetch current cert to get the active dcv_method so the
+        # dcv_params endpoint returns params for the right method.
+        cert_info = client.get(f"/certificate/issued-certs/{cert_id}")
+        current_method = cert_info.get("dcv_method") if isinstance(cert_info, dict) else None
+
         body: dict = {}
+        if current_method:
+            body["dcv_method"] = current_method
         if csr:
             try:
                 body["csr"] = csr.read_text()
