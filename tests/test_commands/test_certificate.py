@@ -650,10 +650,10 @@ class TestCertCsr:
         assert result.exit_code == 1
 
 
-class TestCertIssue:
+class TestCertCreate:
     """Tests for the certificate issue command."""
 
-    def test_cert_issue(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create(self, httpx_mock: HTTPXMock, tmp_path):
         fixture = load_fixture("issue_response.json")
         httpx_mock.add_response(json=fixture)
         csr_file = tmp_path / "test.csr"
@@ -662,7 +662,7 @@ class TestCertIssue:
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_1_10_0_digicert",
             ])
@@ -670,7 +670,7 @@ class TestCertIssue:
         assert result.exit_code == 0
         assert "order submitted" in result.stdout.lower()
 
-    def test_cert_issue_sends_correct_url(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create_sends_correct_url(self, httpx_mock: HTTPXMock, tmp_path):
         fixture = load_fixture("issue_response.json")
         httpx_mock.add_response(json=fixture)
         csr_file = tmp_path / "test.csr"
@@ -679,7 +679,7 @@ class TestCertIssue:
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_1_10_0_digicert",
             ])
@@ -690,7 +690,7 @@ class TestCertIssue:
         url = str(request.url)
         assert url.endswith("/certificate/issued-certs") or "/certificate/issued-certs?" in url
 
-    def test_cert_issue_sends_csr_and_package_in_body(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create_sends_csr_and_package_in_body(self, httpx_mock: HTTPXMock, tmp_path):
         fixture = load_fixture("issue_response.json")
         httpx_mock.add_response(json=fixture)
         csr_file = tmp_path / "test.csr"
@@ -699,7 +699,7 @@ class TestCertIssue:
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_1_10_0_digicert",
             ])
@@ -710,7 +710,7 @@ class TestCertIssue:
         assert "BEGIN CERTIFICATE REQUEST" in body["csr"]
         assert body["package"] == "cert_std_1_10_0_digicert"
 
-    def test_cert_issue_with_dcv_method(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create_with_dcv_method(self, httpx_mock: HTTPXMock, tmp_path):
         fixture = load_fixture("issue_response.json")
         httpx_mock.add_response(json=fixture)
         csr_file = tmp_path / "test.csr"
@@ -719,7 +719,7 @@ class TestCertIssue:
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_1_10_0_digicert",
                 "--dcv-method", "dns",
@@ -730,7 +730,7 @@ class TestCertIssue:
         body = json.loads(request.content)
         assert body["dcv_method"] == "dns"
 
-    def test_cert_issue_with_altnames(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create_with_altnames(self, httpx_mock: HTTPXMock, tmp_path):
         fixture = load_fixture("issue_response.json")
         httpx_mock.add_response(json=fixture)
         csr_file = tmp_path / "test.csr"
@@ -739,7 +739,7 @@ class TestCertIssue:
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_3_10_0_digicert",
                 "--altnames", "www.example.com, api.example.com",
@@ -750,7 +750,7 @@ class TestCertIssue:
         body = json.loads(request.content)
         assert body["altnames"] == ["www.example.com", "api.example.com"]
 
-    def test_cert_issue_dry_run(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create_dry_run(self, httpx_mock: HTTPXMock, tmp_path):
         httpx_mock.add_response(json={})
         csr_file = tmp_path / "test.csr"
         csr_file.write_text("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n")
@@ -758,7 +758,7 @@ class TestCertIssue:
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_1_10_0_digicert",
                 "--dry-run",
@@ -769,7 +769,7 @@ class TestCertIssue:
         request = httpx_mock.get_request()
         assert request.headers.get("dry-run") == "1"
 
-    def test_cert_issue_shows_certificate_id(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create_shows_certificate_id(self, httpx_mock: HTTPXMock, tmp_path):
         fixture = load_fixture("issue_response.json")
         httpx_mock.add_response(json=fixture)
         csr_file = tmp_path / "test.csr"
@@ -778,7 +778,7 @@ class TestCertIssue:
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_1_10_0_digicert",
             ])
@@ -786,11 +786,11 @@ class TestCertIssue:
         assert result.exit_code == 0
         assert "cert-003" in result.stdout
 
-    def test_cert_issue_missing_csr_file(self):
+    def test_cert_create_missing_csr_file(self):
         with patch("gandi_cli.commands.certificate._get_client") as mock_client:
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", "/nonexistent/file.csr",
                 "--package", "cert_std_1_10_0_digicert",
             ])
@@ -839,7 +839,7 @@ class TestJsonOutput:
         assert isinstance(parsed["dates"], dict)
         assert isinstance(parsed["altnames"], list)
 
-    def test_cert_issue_json(self, httpx_mock: HTTPXMock, tmp_path):
+    def test_cert_create_json(self, httpx_mock: HTTPXMock, tmp_path):
         fixture = load_fixture("issue_response.json")
         httpx_mock.add_response(json=fixture)
         csr_file = tmp_path / "test.csr"
@@ -849,7 +849,7 @@ class TestJsonOutput:
              self._patch_json_format():
             mock_client.return_value = GandiClient(token="test-token")
             result = runner.invoke(app, [
-                "cert", "issue",
+                "cert", "create",
                 "--csr", str(csr_file),
                 "--package", "cert_std_1_10_0_digicert",
             ])

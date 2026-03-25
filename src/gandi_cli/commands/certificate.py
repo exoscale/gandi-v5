@@ -117,8 +117,8 @@ def cert_csr(
         typer.echo(f"CSR:  {csr_file}")
 
 
-@cert_app.command("issue")
-def cert_issue(
+@cert_app.command("create")
+def cert_create(
     csr: Annotated[
         Path,
         typer.Option("--csr", help="Path to PEM-encoded CSR file"),
