@@ -545,22 +545,6 @@ def cert_dcv_info(
         raise typer.Exit(1)
 
 
-def _package_to_pem_type(package_name: str) -> str:
-    """Derive the intermediate cert type from a package name.
-
-    Package names look like 'cert_std_1_10_0_digicert' or 'cert_bus_1_0_0'.
-    The PEM type is the prefix before the version digits, e.g. 'cert_std'.
-    """
-    parts = package_name.split("_")
-    # Walk until we hit a digit — everything before that is the type.
-    prefix_parts = []
-    for part in parts:
-        if part.isdigit():
-            break
-        prefix_parts.append(part)
-    return "_".join(prefix_parts) if prefix_parts else package_name
-
-
 @cert_app.command("download")
 def cert_download(
     cert_id: Annotated[str, typer.Argument(help="Certificate ID")],
@@ -577,30 +561,30 @@ def cert_download(
     """
     client = _get_client()
     try:
-        # 1. Fetch cert details to get CN and package name
+        # 1. Fetch cert details — response includes 'cert' (domain PEM) and
+        # 'intermediate' (URL to the intermediate cert PEM).
         info = client.get(f"/certificate/issued-certs/{cert_id}")
         cn = info.get("cn", "")
         if not cn:
             typer.echo("Error: certificate has no CN.", err=True)
             raise typer.Exit(1)
-        pkg = info.get("package", {})
-        package_name = pkg.get("name", "") if isinstance(pkg, dict) else str(pkg)
-        if not package_name:
-            typer.echo("Error: certificate has no package name.", err=True)
+
+        # 2. Domain cert PEM is already in the response.
+        domain_pem = info.get("cert", "")
+        if not domain_pem:
+            typer.echo("Error: certificate has no cert data.", err=True)
             raise typer.Exit(1)
 
-        pem_type = _package_to_pem_type(package_name)
-
-        # 2. Fetch domain cert
-        domain_pem = client.get(
-            f"/certificate/issued-certs/{cert_id}/crt",
-            headers={"Accept": "text/plain"},
+        # 3. Fetch intermediate cert from the URL provided by the API.
+        inter_url = info.get("intermediate", "")
+        if not inter_url:
+            typer.echo("Error: certificate has no intermediate URL.", err=True)
+            raise typer.Exit(1)
+        inter_path = inter_url.replace("https://api.gandi.net/v5", "").replace(
+            "https://api.sandbox.gandi.net/v5", ""
         )
-        domain_pem = domain_pem if isinstance(domain_pem, str) else str(domain_pem)
-
-        # 3. Fetch intermediate cert
         intermediate_pem = client.get(
-            f"/certificate/pem/{pem_type}",
+            inter_path,
             headers={"Accept": "text/plain"},
         )
         intermediate_pem = intermediate_pem if isinstance(intermediate_pem, str) else str(intermediate_pem)
@@ -609,7 +593,11 @@ def cert_download(
         chain = domain_pem.rstrip("\n") + "\n" + intermediate_pem.rstrip("\n") + "\n"
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        out_file = output_dir / f"{cn}.crt"
+        # Sanitize CN for filenames: wildcard "*.example.com" → "wildcard.example.com"
+        filename_base = cn.lstrip("*").lstrip(".")
+        if cn.startswith("*"):
+            filename_base = f"wildcard.{filename_base}"
+        out_file = output_dir / f"{filename_base}.crt"
 
         from gandi_cli.main import state
 
