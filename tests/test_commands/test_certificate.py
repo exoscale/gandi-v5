@@ -1228,3 +1228,17 @@ class TestFqdnToExoArgs:
         name, domain = _fqdn_to_exo_args("_acme-challenge.example.com.")
         assert name == "_acme-challenge"
         assert domain == "example.com"
+
+    def test_subdomain_with_short_tld_like_io(self):
+        """Short second label (e.g. exo.io) must NOT be treated as a ccTLD."""
+        from gandi_cli.commands.certificate import _fqdn_to_exo_args
+        name, domain = _fqdn_to_exo_args("_dnsauth.sos-hr-zag-1.exo.io")
+        assert name == "_dnsauth.sos-hr-zag-1"
+        assert domain == "exo.io"
+
+    def test_wildcard_subdomain_with_io(self):
+        """Wildcard cert name like *.sos-hr-zag-1.exo.io produces correct args."""
+        from gandi_cli.commands.certificate import _fqdn_to_exo_args
+        name, domain = _fqdn_to_exo_args("*.sos-hr-zag-1.exo.io")
+        assert name == "*.sos-hr-zag-1"
+        assert domain == "exo.io"

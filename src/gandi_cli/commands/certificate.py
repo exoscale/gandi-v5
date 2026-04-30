@@ -363,16 +363,27 @@ def _fqdn_to_exo_args(fqdn: str) -> tuple[str, str]:
 
     Example: "_acme-challenge.example.com" -> ("_acme-challenge", "example.com")
     Example: "_acme-challenge.sub.example.co.uk" -> ("_acme-challenge.sub", "example.co.uk")
-
-    Uses a simple heuristic: the domain is the last two labels, or last
-    three if the second-to-last is short (co, com, org, etc. for ccTLDs).
     """
     parts = fqdn.rstrip(".").split(".")
     if len(parts) <= 2:
         return ("", fqdn)
 
-    # Heuristic for two-part TLDs like co.uk, com.au, org.nz
-    if len(parts) >= 3 and len(parts[-2]) <= 3 and len(parts[-1]) <= 2:
+    # Known two-part TLDs (second-level domain + ccTLD).
+    # Using a whitelist instead of a length heuristic avoids false positives
+    # like "exo.io" (where "exo" is short but not a second-level domain keyword).
+    two_part_tlds = {
+        "co.uk", "co.jp", "co.nz", "co.za", "co.ke", "co.zw", "co.zm",
+        "co.mz", "co.il", "co.th",
+        "com.au", "com.br", "com.mx", "com.ar", "com.co", "com.pe", "com.py",
+        "net.au", "net.nz",
+        "org.au", "org.nz",
+        "gov.au", "gov.uk", "gov.in",
+        "ac.uk", "ac.za", "ac.jp",
+        "edu.au", "edu.hk", "edu.cn",
+    }
+
+    candidate_tld = ".".join(parts[-2:])
+    if candidate_tld in two_part_tlds:
         domain = ".".join(parts[-3:])
         name = ".".join(parts[:-3])
     else:
