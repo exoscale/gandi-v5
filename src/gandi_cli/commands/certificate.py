@@ -77,8 +77,12 @@ def cert_csr(
         raise typer.Exit(1)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    key_file = output_dir / f"{domain}.key"
-    csr_file = output_dir / f"{domain}.csr"
+    # Sanitize domain for filenames: wildcard "*.example.com" → "wildcard.example.com"
+    filename_base = domain.lstrip("*").lstrip(".")
+    if domain.startswith("*"):
+        filename_base = f"wildcard.{filename_base}"
+    key_file = output_dir / f"{filename_base}.key"
+    csr_file = output_dir / f"{filename_base}.csr"
 
     if key_file.exists():
         typer.echo(

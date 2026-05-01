@@ -663,6 +663,24 @@ class TestCertCsr:
         assert result.exit_code == 0
         assert out_dir.exists()
 
+    def test_cert_csr_wildcard_uses_safe_filename(self, tmp_path):
+        """Wildcard domains should use 'wildcard' instead of '*' in filenames."""
+        def fake_openssl(cmd, **kwargs):
+            for i, arg in enumerate(cmd):
+                if arg == "-out" and i + 1 < len(cmd):
+                    Path(cmd[i + 1]).write_text("fake")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("gandi_cli.commands.certificate.subprocess.run", side_effect=fake_openssl):
+            result = runner.invoke(app, [
+                "cert", "csr", "*.example.com", "-d", str(tmp_path),
+            ])
+
+        assert result.exit_code == 0
+        # Files should use "wildcard" not "*"
+        assert (tmp_path / "wildcard.example.com.key").exists()
+        assert (tmp_path / "wildcard.example.com.csr").exists()
+
     def test_cert_csr_invalid_key_type(self, tmp_path):
         result = runner.invoke(app, [
             "cert", "csr", "example.com", "-d", str(tmp_path),
